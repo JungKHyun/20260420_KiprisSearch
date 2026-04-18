@@ -136,6 +136,7 @@
 
     .empty-msg { text-align: center; padding: 50px; color: #999; font-size: 0.9rem; }
     .chip { display: inline-block; background: #e8eaf6; color: #3949ab; padding: 1px 7px; border-radius: 3px; font-size: 0.75rem; margin: 1px; }
+    .kw-tag { display: inline-block; background: #fff8e1; color: #e65100; border: 1px solid #ffe082; padding: 1px 7px; border-radius: 10px; font-size: 0.74rem; margin: 1px 2px; white-space: nowrap; }
 
     @media (max-width: 900px) {
       .form-grid { grid-template-columns: 1fr 1fr; }
@@ -156,9 +157,14 @@
 
   <div class="search-box">
     <!-- 서비스 키 -->
-    <div class="form-group" style="margin-bottom:14px;">
+    <div class="form-group" style="margin-bottom:10px;">
       <label>🔑 서비스 키 (Service Key)</label>
       <input type="password" id="serviceKey" placeholder="KIPRIS Plus 발급 서비스 키 입력" autocomplete="off">
+    </div>
+    <!-- Gemini API 키 -->
+    <div class="form-group" style="margin-bottom:14px;">
+      <label>🤖 Gemini API 키 <span style="font-size:0.78rem;color:#999;font-weight:400;">(선택 · 입력 시 AI가 초록에서 키워드를 추출합니다)</span></label>
+      <input type="password" id="geminiKey" placeholder="Gemini API Key (선택사항)" autocomplete="off">
     </div>
 
     <!-- 검색 조건 -->
@@ -194,7 +200,8 @@
       <div class="form-group">
         <label>📄 페이지당 건수</label>
         <select id="numOfRows">
-          <option value="30">30건</option>
+          <option value="10">10건</option>
+          <option value="30" selected>30건</option>
           <option value="50">50건</option>
           <option value="100">100건</option>
           <option value="500">500건 (최대)</option>
@@ -252,6 +259,8 @@
   window.addEventListener('DOMContentLoaded', () => {
     const saved = localStorage.getItem('kiprisServiceKey');
     if (saved) document.getElementById('serviceKey').value = saved;
+    const savedGemini = localStorage.getItem('geminiKey');
+    if (savedGemini) document.getElementById('geminiKey').value = savedGemini;
 
     ['word', 'inventionTitle', 'applicant'].forEach(id => {
       document.getElementById(id).addEventListener('keydown', e => {
@@ -277,6 +286,8 @@
     if (!patent && !utility) { alert('특허 또는 실용신안 중 하나 이상을 선택해주세요.'); return; }
 
     localStorage.setItem('kiprisServiceKey', serviceKey);
+    const geminiKey = document.getElementById('geminiKey').value.trim();
+    if (geminiKey) localStorage.setItem('geminiKey', geminiKey);
     currentPage = pageNo;
     currentRows = numOfRows;
     lastSearchWord = word || inventionTitle || applicant;
@@ -352,6 +363,7 @@
         ipcNumber: getXmlText(item, 'ipcNumber'),
         astrtCont: getXmlText(item, 'astrtCont'),
       });
+      results[results.length - 1].keywords = extractKeywords(results[results.length - 1].astrtCont);
     });
 
     currentResults = results;
@@ -359,6 +371,9 @@
 
     renderResults(results, totalCount, numOfRows, pageNo);
     document.getElementById('noticeArea').innerHTML = '';
+
+    const geminiKey2 = document.getElementById('geminiKey').value.trim();
+    if (geminiKey2) extractAllKeywordsWithGemini(results, geminiKey2);
   }
 
   // ─── 결과 테이블 렌더링 ──────────────────────────────────
@@ -371,6 +386,7 @@
       return;
     }
 
+    const useGemini = !!document.getElementById('geminiKey').value.trim();
     const rows = results.map((r, i) => {
       const statusBadge = makeStatusBadge(r.registerStatus);
       const ipcChips = r.ipcNumber ? r.ipcNumber.split('|').map(c => `<span class="chip">${c.trim()}</span>`).join('') : '-';
@@ -392,6 +408,8 @@
           <td class="td-abstract">
             <span class="abstract-text" onclick="toggleAbstract(this)" title="클릭하여 펼치기">${escHtml(r.astrtCont) || '-'}</span>
           </td>
+          <td id="sum-${i}" style="min-width:160px;max-width:260px;font-size:0.8rem;color:#444;line-height:1.5;">${useGemini ? '<span style="color:#aaa;font-size:0.74rem;">🤖 요약 중...</span>' : '-'}</td>
+          <td id="kw-${i}" style="min-width:140px;max-width:200px;">${useGemini ? '<span style="color:#aaa;font-size:0.74rem;">🤖 추출 중...</span>' : (r.keywords && r.keywords.length ? r.keywords.map(k => `<span class="kw-tag">${escHtml(k)}</span>`).join('') : '-')}</td>
         </tr>`;
     }).join('');
 
@@ -423,6 +441,8 @@
                 <th>출원인</th>
                 <th>IPC코드</th>
                 <th>초록</th>
+                <th>핵심 요약</th>
+                <th>주요 키워드</th>
               </tr>
             </thead>
             <tbody>${rows}</tbody>
@@ -455,15 +475,17 @@
   // ─── Excel 다운로드 ──────────────────────────────────────
   function downloadExcel() {
     if (!currentResults.length) { alert('다운로드할 데이터가 없습니다.'); return; }
-    const header = ['No.', '발명의명칭', '출원번호', '출원일자', '등록번호', '등록일자', '등록상태', '출원인', 'IPC코드', '초록'];
+    const header = ['No.', '발명의명칭', '출원번호', '출원일자', '등록번호', '등록일자', '등록상태', '출원인', 'IPC코드', '초록', '핵심요약', '주요키워드'];
     const rows = currentResults.map((r, i) => [
       (currentPage - 1) * currentRows + i + 1,
       r.inventionTitle, r.applicationNumber, r.applicationDate,
       r.registerNumber, r.registerDate, r.registerStatus,
-      r.applicantName, r.ipcNumber, r.astrtCont
+      r.applicantName, r.ipcNumber, r.astrtCont,
+      r.summary || '',
+      (r.keywords || []).join(', ')
     ]);
     const ws = XLSX.utils.aoa_to_sheet([header, ...rows]);
-    ws['!cols'] = [5, 40, 16, 12, 16, 12, 10, 20, 15, 50].map(w => ({ wch: w }));
+    ws['!cols'] = [5, 40, 16, 12, 16, 12, 10, 20, 15, 50, 35, 30].map(w => ({ wch: w }));
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, '특허검색결과');
     XLSX.writeFile(wb, `KIPRIS_${lastSearchWord}_p${currentPage}.xlsx`);
@@ -472,12 +494,14 @@
   // ─── CSV 다운로드 ─────────────────────────────────────────
   function downloadCSV() {
     if (!currentResults.length) { alert('다운로드할 데이터가 없습니다.'); return; }
-    const header = ['No.', '발명의명칭', '출원번호', '출원일자', '등록번호', '등록일자', '등록상태', '출원인', 'IPC코드', '초록'];
+    const header = ['No.', '발명의명칭', '출원번호', '출원일자', '등록번호', '등록일자', '등록상태', '출원인', 'IPC코드', '초록', '핵심요약', '주요키워드'];
     const csvRows = [header, ...currentResults.map((r, i) => [
       (currentPage - 1) * currentRows + i + 1,
       r.inventionTitle, r.applicationNumber, r.applicationDate,
       r.registerNumber, r.registerDate, r.registerStatus,
-      r.applicantName, r.ipcNumber, r.astrtCont
+      r.applicantName, r.ipcNumber, r.astrtCont,
+      r.summary || '',
+      (r.keywords || []).join(', ')
     ])].map(row => row.map(v => `"${(v || '').toString().replace(/"/g, '""')}"`).join(','));
     const bom = '\uFEFF';
     const blob = new Blob([bom + csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
@@ -516,6 +540,102 @@
     return `<span class="badge ${cls}">${escHtml(status)}</span>`;
   }
 
+  // ─── Gemini AI 요약+키워드 추출 ──────────────────────────────────────────────────────────
+  async function extractWithGemini(abstract, apiKey) {
+    if (!abstract) return { summary: '', keywords: [] };
+    const prompt = `다음 특허 초록을 분석하여 summary(2문장 이내 핵심 요약)와 keywords(핵심 기술 키워드 최대 7개 배열)를 JSON으로 반환하세요.\n\n초록:\n${abstract}`;
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(apiKey)}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: {
+            maxOutputTokens: 1024,
+            temperature: 0.1,
+            responseMimeType: 'application/json'
+          }
+        })
+      }
+    );
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      throw new Error(`Gemini ${res.status}${errText ? ': ' + errText.slice(0, 100) : ''}`);
+    }
+    const data = await res.json();
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    try {
+      const parsed = JSON.parse(text);
+      return {
+        summary: parsed.summary || '',
+        keywords: (parsed.keywords || []).slice(0, 7)
+      };
+    } catch (e) {
+      // JSON 파싱 실패 시 정규식으로 폴백 추출
+      const sumMatch = text.match(/"summary"\s*:\s*"((?:[^"\\]|\\.)*?)"/);
+      const kwMatch = text.match(/"keywords"\s*:\s*\[([^\]]*?)\]/);
+      const summary = sumMatch ? sumMatch[1].replace(/\\n/g, ' ').replace(/\\"/g, '"') : '';
+      const keywords = kwMatch
+        ? kwMatch[1].match(/"((?:[^"\\]|\\.)*?)"/g)?.map(k => k.replace(/^"|"$/g, '').replace(/\\"/g, '"')).slice(0, 7) || []
+        : [];
+      return { summary, keywords };
+    }
+  }
+
+  async function extractAllKeywordsWithGemini(results, apiKey) {
+    for (let i = 0; i < results.length; i++) {
+      const sumCell = document.getElementById(`sum-${i}`);
+      const kwCell = document.getElementById(`kw-${i}`);
+      if (!sumCell && !kwCell) continue;
+      try {
+        const { summary, keywords } = await extractWithGemini(results[i].astrtCont, apiKey);
+        results[i].summary = summary;
+        results[i].keywords = keywords;
+        if (sumCell) sumCell.innerHTML = summary ? escHtml(summary) : '-';
+        if (kwCell) kwCell.innerHTML = keywords.length
+          ? keywords.map(k => `<span class="kw-tag">${escHtml(k)}</span>`).join('')
+          : '-';
+      } catch (e) {
+        const errHtml = `<span style="color:#e53935;font-size:0.74rem;">⚠️ 오류: ${escHtml(e.message)}</span>`;
+        if (sumCell) sumCell.innerHTML = errHtml;
+        if (kwCell) kwCell.innerHTML = errHtml;
+      }
+      if (i < results.length - 1) await new Promise(r => setTimeout(r, 300));
+    }
+  }
+
+  // ─── 키워드 추출 (폴백) ────────────────────────────────────────────────────────────────
+  function extractKeywords(text) {
+    if (!text) return [];
+    const stopWords = new Set([
+      '있는', '있다', '있어', '있으며', '있고', '있도록', '있게', '있음',
+      '하는', '하여', '하고', '하며', '하기', '하도록', '하게', '한다', '하였다', '하였으며',
+      '이는', '이고', '이며', '이다', '이에', '이를', '이의', '이로', '이때',
+      '되는', '되어', '되고', '되며', '된다', '되도록', '되게', '되었다', '되었으며',
+      '위한', '위해', '위하여', '통해', '통하여', '통한',
+      '것이', '것을', '것으로', '것이다', '것인', '것과',
+      '및', '또는', '또한', '그리고', '그러나', '따라서', '때문에', '경우에', '경우',
+      '본', '발명', '관한', '관련', '대한', '대해', '이용', '사용', '적용',
+      '제공', '구성', '포함', '형성', '수행', '처리', '실시', '실현',
+      '방법', '장치', '시스템', '방식', '구조', '형태', '상태', '단계',
+      '으로', '에서', '에게', '부터', '까지', '에는', '에서는',
+      '등의', '등을', '등이', '등에', '등과', '등으로',
+      '않는', '않고', '않아', '않도록', '않은',
+      '에의', '로의', '의해', '으로서', '으로써',
+      '가능', '기능', '동작', '수있', '통하여', '따른', '따라',
+    ]);
+    const words = text.match(/[가-힣]{2,}/g) || [];
+    const freq = {};
+    for (const w of words) {
+      if (!stopWords.has(w)) freq[w] = (freq[w] || 0) + 1;
+    }
+    return Object.entries(freq)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 7)
+      .map(([w]) => w);
+  }
+
   function toggleAbstract(el) {
     el.classList.toggle('expanded');
   }
@@ -539,652 +659,6 @@
       msg += `<strong>CORS 오류입니다.</strong> 브라우저에서 직접 파일을 열면 API 호출이 차단됩니다.<br><br>
       <strong>해결 방법:</strong> 터미널에서 <code>python server.py</code> 실행 후 <code>http://localhost:8080/kipris_search.html</code>로 접속하세요.`;
     }
-    msg += `</div>`;
-    document.getElementById('resultArea').innerHTML = msg;
-    document.getElementById('noticeArea').innerHTML = '';
-  }
-
-  function showErrorMsg(msg) {
-    const html = escHtml(msg).replace(/\n/g, '<br>');
-    document.getElementById('resultArea').innerHTML = `<div class="result-box"><div class="error-box">⚠️ ${html}</div></div>`;
-  }
-</script>
-</body>
-</html>
-<!DOCTYPE html>
-<html lang="ko">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>KIPRIS 특허 검색 (국내·해외)</title>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: 'Malgun Gothic', 'Segoe UI', sans-serif; background: #f0f2f5; color: #333; min-height: 100vh; }
-    .container { max-width: 1400px; margin: 0 auto; padding: 24px; }
-
-    /* Header */
-    .page-header { margin-bottom: 20px; }
-    .page-header h1 { font-size: 1.4rem; font-weight: 700; color: #1a237e; display: flex; align-items: center; gap: 8px; }
-    .page-header p { font-size: 0.85rem; color: #777; margin-top: 4px; }
-
-    /* Search Box */
-    .search-box {
-      background: white;
-      border-radius: 10px;
-      padding: 24px;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.08);
-      margin-bottom: 20px;
-    }
-    .form-grid {
-      display: grid;
-      grid-template-columns: 2fr 1fr 1fr 1fr;
-      gap: 16px;
-      align-items: end;
-    }
-    .form-row-2 {
-      display: grid;
-      grid-template-columns: 3fr 1fr;
-      gap: 16px;
-      margin-top: 14px;
-      align-items: end;
-    }
-    .form-group { display: flex; flex-direction: column; gap: 6px; }
-    .form-group label { font-size: 0.82rem; font-weight: 600; color: #555; letter-spacing: 0.3px; }
-    input[type=text], input[type=password], select {
-      padding: 9px 12px;
-      border: 1.5px solid #ddd;
-      border-radius: 6px;
-      font-size: 0.9rem;
-      font-family: inherit;
-      transition: border-color 0.2s;
-      background: #fafafa;
-    }
-    input[type=text]:focus, input[type=password]:focus, select:focus {
-      outline: none;
-      border-color: #3949ab;
-      background: white;
-    }
-    .checkbox-row { display: flex; align-items: center; gap: 20px; }
-    .checkbox-item { display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 0.9rem; }
-    .checkbox-item input[type=checkbox] { width: 16px; height: 16px; cursor: pointer; accent-color: #1a237e; }
-    .action-row { display: flex; gap: 10px; align-items: center; margin-top: 16px; border-top: 1px solid #eee; padding-top: 16px; }
-
-    /* Buttons */
-    .btn { padding: 9px 22px; border: none; border-radius: 6px; cursor: pointer; font-size: 0.88rem; font-weight: 600; font-family: inherit; transition: all 0.15s; display: inline-flex; align-items: center; gap: 6px; }
-    .btn:disabled { opacity: 0.55; cursor: not-allowed; }
-    .btn-primary { background: #1a237e; color: white; }
-    .btn-primary:hover:not(:disabled) { background: #283593; }
-    .btn-success { background: #2e7d32; color: white; }
-    .btn-success:hover:not(:disabled) { background: #388e3c; }
-    .btn-outline { background: white; color: #1a237e; border: 1.5px solid #1a237e; }
-    .btn-outline:hover:not(:disabled) { background: #e8eaf6; }
-
-    /* Info / Notice */
-    .notice {
-      background: #fff8e1;
-      border-left: 4px solid #f9a825;
-      border-radius: 4px;
-      padding: 10px 14px;
-      font-size: 0.82rem;
-      color: #6d4c0d;
-      margin-bottom: 16px;
-      line-height: 1.6;
-    }
-    .notice strong { color: #e65100; }
-
-    /* Error */
-    .error-box {
-      background: #ffebee;
-      border-left: 4px solid #e53935;
-      border-radius: 4px;
-      padding: 14px 16px;
-      color: #b71c1c;
-      font-size: 0.88rem;
-      line-height: 1.6;
-    }
-    .error-box code { background: #ffcdd2; padding: 1px 5px; border-radius: 3px; font-size: 0.82rem; }
-
-    /* Results */
-    .result-box {
-      background: white;
-      border-radius: 10px;
-      padding: 20px 24px;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.08);
-    }
-    .result-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 16px;
-      flex-wrap: wrap;
-      gap: 10px;
-    }
-    .result-count { font-size: 0.9rem; color: #444; }
-    .result-count strong { color: #1a237e; font-size: 1rem; }
-    .download-btns { display: flex; gap: 8px; }
-
-    /* Table */
-    .table-wrap { overflow-x: auto; }
-    table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
-    thead th {
-      background: #1a237e;
-      color: white;
-      padding: 10px 8px;
-      text-align: left;
-      white-space: nowrap;
-      font-weight: 600;
-      letter-spacing: 0.2px;
-    }
-    thead th:first-child { border-radius: 6px 0 0 0; }
-    thead th:last-child { border-radius: 0 6px 0 0; }
-    tbody tr:nth-child(even) td { background: #f8f9ff; }
-    tbody tr:hover td { background: #e8eaf6 !important; }
-    td { padding: 8px; border-bottom: 1px solid #eee; vertical-align: top; line-height: 1.4; }
-
-    .td-title { min-width: 220px; max-width: 320px; }
-    .td-title a { color: #1a237e; text-decoration: none; font-weight: 500; }
-    .td-title a:hover { text-decoration: underline; }
-    .td-abstract { max-width: 220px; color: #666; font-size: 0.8rem; }
-    .abstract-text { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; cursor: pointer; }
-    .abstract-text.expanded { display: block; -webkit-line-clamp: unset; }
-
-    .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 0.75rem; font-weight: 700; white-space: nowrap; }
-    .badge-reg { background: #e8f5e9; color: #2e7d32; }
-    .badge-open { background: #e3f2fd; color: #1565c0; }
-    .badge-dismiss { background: #fce4ec; color: #880e4f; }
-    .badge-default { background: #f5f5f5; color: #555; }
-
-    /* Pagination */
-    .pagination { display: flex; justify-content: center; gap: 4px; margin-top: 20px; flex-wrap: wrap; }
-    .page-btn { padding: 6px 12px; border: 1.5px solid #ddd; background: white; border-radius: 5px; cursor: pointer; font-size: 0.82rem; font-family: inherit; transition: all 0.15s; }
-    .page-btn:hover:not(.active):not(:disabled) { background: #e8eaf6; border-color: #9fa8da; }
-    .page-btn.active { background: #1a237e; color: white; border-color: #1a237e; font-weight: 700; }
-    .page-btn:disabled { opacity: 0.4; cursor: default; }
-
-    /* Loading */
-    .loading-wrap { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 60px 20px; gap: 16px; color: #666; }
-    .spinner { width: 40px; height: 40px; border: 4px solid #e0e0e0; border-top: 4px solid #1a237e; border-radius: 50%; animation: spin 0.8s linear infinite; }
-    @keyframes spin { to { transform: rotate(360deg); } }
-
-    .empty-msg { text-align: center; padding: 50px; color: #999; font-size: 0.9rem; }
-    .chip { display: inline-block; background: #e8eaf6; color: #3949ab; padding: 1px 7px; border-radius: 3px; font-size: 0.75rem; margin: 1px; }
-
-    /* Tab */
-    .mode-tabs { display: flex; gap: 0; margin-bottom: 20px; border-radius: 10px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.08); }
-    .mode-tab { flex: 1; padding: 14px; text-align: center; cursor: pointer; font-size: 0.95rem; font-weight: 700; border: none; font-family: inherit; transition: all 0.2s; background: white; color: #999; border-bottom: 3px solid transparent; }
-    .mode-tab.active { color: #1a237e; border-bottom: 3px solid #1a237e; background: #f0f3ff; }
-    .mode-tab:hover:not(.active) { background: #f5f5f5; color: #555; }
-    .overseas-only { display: none; }
-    .domestic-only { display: flex; flex-direction: column; gap: 6px; }
-
-    @media (max-width: 900px) {
-      .form-grid { grid-template-columns: 1fr 1fr; }
-      .form-row-2 { grid-template-columns: 1fr; }
-    }
-    @media (max-width: 600px) {
-      .form-grid { grid-template-columns: 1fr; }
-      .container { padding: 12px; }
-    }
-  </style>
-</head>
-<body>
-<div class="container">
-
-  <div class="page-header">
-    <h1>🔍 KIPRIS 특허 검색</h1>
-    <p>한국 특허청 KIPRIS Plus API를 통해 국내·해외 특허 정보를 조회합니다.</p>
-  </div>
-
-  <!-- 탭 -->
-  <div class="mode-tabs">
-    <button class="mode-tab active" id="tabDomestic" onclick="switchMode('domestic')">🇰🇷 국내 특허·실용신안</button>
-    <button class="mode-tab" id="tabOverseas" onclick="switchMode('overseas')">🌐 해외 특허 (미국·유럽·일본·중국·PCT)</button>
-  </div>
-
-  <div class="search-box">
-    <!-- 서비스 키 -->
-    <div class="form-group" style="margin-bottom:14px;">
-      <label>🔑 서비스 키 (Service Key)</label>
-      <input type="password" id="serviceKey" placeholder="KIPRIS Plus 발급 서비스 키 입력" autocomplete="off">
-    </div>
-
-    <!-- 검색 조건 -->
-    <div class="form-grid">
-      <div class="form-group">
-        <label>🔍 자유검색 (전체 필드)</label>
-        <input type="text" id="word" placeholder="예: 인공지능, 배터리, CFRP">
-      </div>
-      <div class="form-group">
-        <label>📌 발명의 명칭</label>
-        <input type="text" id="inventionTitle" placeholder="발명 명칭 키워드">
-      </div>
-      <div class="form-group">
-        <label>🏢 출원인</label>
-        <input type="text" id="applicant" placeholder="출원인명 또는 특허고객번호">
-      </div>
-      <div class="form-group domestic-only" id="lastvalueGroup">
-        <label>📋 행정처분 (등록상태)</label>
-        <select id="lastvalue">
-          <option value="">전체</option>
-          <option value="R">등록</option>
-          <option value="A">공개</option>
-          <option value="C">취하</option>
-          <option value="F">소멸</option>
-          <option value="G">포기</option>
-          <option value="I">무효</option>
-          <option value="J">거절</option>
-        </select>
-      </div>
-      <div class="form-group overseas-only" id="nationGroup">
-        <label>🌍 국가</label>
-        <select id="nation">
-          <option value="">전체</option>
-          <option value="US">🇺🇸 미국 (US)</option>
-          <option value="EP">🇪🇺 유럽 (EP)</option>
-          <option value="JP">🇯🇵 일본 (JP)</option>
-          <option value="CN">🇨🇳 중국 (CN)</option>
-          <option value="WO">🌐 국제 (PCT/WO)</option>
-        </select>
-      </div>
-    </div>
-
-    <div class="form-grid" style="margin-top:12px;">
-      <div class="form-group">
-        <label>📄 페이지당 건수</label>
-        <select id="numOfRows">
-          <option value="30">30건</option>
-          <option value="50">50건</option>
-          <option value="100">100건</option>
-          <option value="500">500건 (최대)</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label>🔃 정렬 기준</label>
-        <select id="sortSpec">
-          <option value="AD">출원일자</option>
-          <option value="GD">등록일자</option>
-          <option value="PD">공고일자</option>
-          <option value="OPD">공개일자</option>
-        </select>
-      </div>
-      <div class="form-group domestic-only" id="patentCheckGroup">
-        <label>📂 구분</label>
-        <div class="checkbox-row">
-          <label class="checkbox-item">
-            <input type="checkbox" id="patent" checked> 특허
-          </label>
-          <label class="checkbox-item">
-            <input type="checkbox" id="utility" checked> 실용신안
-          </label>
-        </div>
-      </div>
-      <div class="form-group">
-        <label>&nbsp;</label>
-        <button class="btn btn-primary" onclick="doSearch(1)" id="searchBtn" style="width:100%;">
-          🔍 검색
-        </button>
-      </div>
-    </div>
-
-    <div class="action-row">
-      <span style="font-size:0.82rem; color:#999;">Enter 키로도 검색 가능 · 서비스 키는 브라우저에 저장됩니다. · 자유검색/발명명칭/출원인 중 하나 이상 입력 필요</span>
-    </div>
-  </div>
-
-  <div id="noticeArea"></div>
-  <div id="resultArea"></div>
-
-</div>
-
-<script>
-  // ─── 전역 상태 ───────────────────────────────────────────
-  let currentPage = 1;
-  let currentResults = [];
-  let currentTotal = 0;
-  let currentRows = 30;
-  let lastSearchWord = '';
-  let currentMode = 'domestic'; // 'domestic' | 'overseas'
-
-  const API_DOMESTIC = '/api/kipris';
-  const API_OVERSEAS = '/api/kipris-intl';
-
-  // ─── 탭 전환 ─────────────────────────────────────────────
-  function switchMode(mode) {
-    currentMode = mode;
-    document.getElementById('tabDomestic').classList.toggle('active', mode === 'domestic');
-    document.getElementById('tabOverseas').classList.toggle('active', mode === 'overseas');
-    document.querySelectorAll('.domestic-only').forEach(el => el.style.display = mode === 'domestic' ? 'flex' : 'none');
-    document.querySelectorAll('.overseas-only').forEach(el => el.style.display = mode === 'overseas' ? 'flex' : 'none');
-    document.getElementById('resultArea').innerHTML = '';
-    document.getElementById('noticeArea').innerHTML = '';
-  }
-
-  // ─── 초기화 ───────────────────────────────────────────────
-  window.addEventListener('DOMContentLoaded', () => {
-    const saved = localStorage.getItem('kiprisServiceKey');
-    if (saved) document.getElementById('serviceKey').value = saved;
-
-    ['word', 'inventionTitle', 'applicant'].forEach(id => {
-      document.getElementById(id).addEventListener('keydown', e => {
-        if (e.key === 'Enter') doSearch(1);
-      });
-    });
-    // 초기 상태 적용
-    switchMode('domestic');
-  });
-
-  // ─── 검색 실행 ────────────────────────────────────────────
-  async function doSearch(pageNo) {
-    const word = document.getElementById('word').value.trim();
-    const inventionTitle = document.getElementById('inventionTitle').value.trim();
-    const applicant = document.getElementById('applicant').value.trim();
-    const numOfRows = parseInt(document.getElementById('numOfRows').value);
-    const sortSpec = document.getElementById('sortSpec').value;
-    const serviceKey = document.getElementById('serviceKey').value.trim();
-
-    if (!serviceKey) { alert('서비스 키를 입력해주세요.'); document.getElementById('serviceKey').focus(); return; }
-    if (!word && !inventionTitle && !applicant) { alert('자유검색, 발명명칭, 출원인 중 하나 이상을 입력해주세요.'); return; }
-
-    localStorage.setItem('kiprisServiceKey', serviceKey);
-    currentPage = pageNo;
-    currentRows = numOfRows;
-    lastSearchWord = word || inventionTitle || applicant;
-
-    document.getElementById('searchBtn').disabled = true;
-    showLoading();
-
-    const paramsObj = { numOfRows, pageNo, sortSpec, descSort: 'true', ServiceKey: serviceKey };
-    if (word) paramsObj.word = word;
-    if (inventionTitle) paramsObj.inventionTitle = inventionTitle;
-    if (applicant) paramsObj.applicant = applicant;
-
-    if (currentMode === 'domestic') {
-      const patent = document.getElementById('patent').checked;
-      const utility = document.getElementById('utility').checked;
-      const lastvalue = document.getElementById('lastvalue').value;
-      if (!patent && !utility) { alert('특허 또는 실용신안 중 하나 이상을 선택해주세요.'); document.getElementById('searchBtn').disabled = false; showLoading(); return; }
-      paramsObj.patent = patent ? 'true' : 'false';
-      paramsObj.utility = utility ? 'true' : 'false';
-      if (lastvalue) paramsObj.lastvalue = lastvalue;
-    } else {
-      const nation = document.getElementById('nation').value;
-      if (nation) paramsObj.nation = nation;
-    }
-
-    const API_BASE = currentMode === 'domestic' ? API_DOMESTIC : API_OVERSEAS;
-    const params = new URLSearchParams(paramsObj);
-    const url = `${API_BASE}?${params}`;
-
-    try {
-      const res = await fetch(url, { mode: 'cors' });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const text = await res.text();
-      parseAndRender(text, numOfRows, pageNo);
-    } catch (err) {
-      showError(err, url);
-    } finally {
-      document.getElementById('searchBtn').disabled = false;
-    }
-  }
-
-  // ─── XML 파싱 & 렌더링 ───────────────────────────────────
-  function parseAndRender(xmlText, numOfRows, pageNo) {
-    const parser = new DOMParser();
-    const xml = parser.parseFromString(xmlText, 'text/xml');
-
-    // 에러 체크
-    const resultCode = getXmlText(xml, 'resultCode');
-    const resultMsg = getXmlText(xml, 'resultMsg');
-    if (resultCode && resultCode !== '00') {
-      const codeDesc = {
-        '10': '필수 요청 파라미터가 없습니다.',
-        '11': '요청 파라미터 값이 유효하지 않습니다.',
-        '20': '서비스 키가 등록되지 않았습니다.',
-        '21': '서비스 키가 일시적으로 사용 중지되었습니다.',
-        '22': '서비스 키의 요청 횟수 한도를 초과했습니다.',
-        '30': '서비스 키 인증에 실패했습니다. 키를 다시 확인해주세요.',
-        '31': '서비스 키의 유효기간이 만료되었습니다.\n→ KIPRIS Plus(plus.kipris.or.kr) 로그인 후 마이페이지에서 서비스 키를 연장하거나 재발급 받으세요.',
-        '32': '등록되지 않은 IP 주소입니다.',
-        '99': '서버 내부 오류입니다. 잠시 후 다시 시도해주세요.',
-      }[resultCode] || resultMsg;
-      showErrorMsg(`API 오류 [코드 ${resultCode}]\n${codeDesc}`);
-      return;
-    }
-
-    const items = xml.querySelectorAll('item');
-    const totalCount = parseInt(getXmlText(xml, 'totalCount') || '0');
-
-    const results = [];
-    items.forEach(item => {
-      results.push({
-        indexNo: getXmlText(item, 'indexNo'),
-        nation: getXmlText(item, 'nation'),
-        inventionTitle: getXmlText(item, 'inventionTitle'),
-        applicationNumber: getXmlText(item, 'applicationNumber'),
-        applicationDate: formatDate(getXmlText(item, 'applicationDate')),
-        registerNumber: getXmlText(item, 'registerNumber'),
-        registerDate: formatDate(getXmlText(item, 'registerDate')),
-        registerStatus: getXmlText(item, 'registerStatus'),
-        openNumber: getXmlText(item, 'openNumber'),
-        openDate: formatDate(getXmlText(item, 'openDate')),
-        publicationNumber: getXmlText(item, 'publicationNumber'),
-        publicationDate: formatDate(getXmlText(item, 'publicationDate')),
-        applicantName: getXmlText(item, 'applicantName'),
-        ipcNumber: getXmlText(item, 'ipcNumber'),
-        astrtCont: getXmlText(item, 'astrtCont'),
-        drawing: getXmlText(item, 'drawing'),
-      });
-    });
-
-    currentResults = results;
-    currentTotal = totalCount;
-
-    renderResults(results, totalCount, numOfRows, pageNo);
-    document.getElementById('noticeArea').innerHTML = '';
-  }
-
-  // ─── 결과 테이블 렌더링 ──────────────────────────────────
-  function renderResults(results, totalCount, numOfRows, pageNo) {
-    const area = document.getElementById('resultArea');
-    const totalPages = Math.ceil(totalCount / numOfRows);
-
-    if (results.length === 0) {
-      area.innerHTML = `<div class="result-box"><div class="empty-msg">📭 검색 결과가 없습니다.<br><small>다른 키워드로 검색해보세요.</small></div></div>`;
-      return;
-    }
-
-    const rows = results.map((r, i) => {
-      const statusBadge = makeStatusBadge(r.registerStatus);
-      const ipcChips = r.ipcNumber ? r.ipcNumber.split('|').map(c => `<span class="chip">${c.trim()}</span>`).join('') : '-';
-      const kiprisLink = r.applicationNumber
-        ? `https://patents.google.com/patent/KR${r.applicationNumber}`
-        : '#';
-      return `
-        <tr>
-          <td style="text-align:center;color:#999;">${(pageNo - 1) * numOfRows + i + 1}</td>
-          <td class="td-title">
-            ${r.applicationNumber
-              ? `<a href="https://kipris.or.kr/khome/search/searchResult.do?searchLogicCode=OR&searchKeyword=${encodeURIComponent(r.applicationNumber)}&collection=KR_PATENT" target="_blank" title="${escHtml(r.inventionTitle)}">${escHtml(r.inventionTitle) || '-'}</a>`
-              : escHtml(r.inventionTitle) || '-'
-            }
-          </td>
-          <td style="white-space:nowrap;">${r.applicationNumber || '-'}</td>
-          <td style="white-space:nowrap;">${r.applicationDate || '-'}</td>
-          <td style="white-space:nowrap;">${r.registerNumber || '-'}</td>
-          <td style="white-space:nowrap;">${r.registerDate || '-'}</td>
-          <td>${statusBadge}</td>
-          <td>${escHtml(r.applicantName) || '-'}</td>
-          <td>${ipcChips}</td>
-          <td class="td-abstract">
-            <span class="abstract-text" onclick="toggleAbstract(this)" title="클릭하여 펼치기">${escHtml(r.astrtCont) || '-'}</span>
-          </td>
-        </tr>`;
-    }).join('');
-
-    const pagination = makePagination(pageNo, totalPages);
-
-    area.innerHTML = `
-      <div class="result-box">
-        <div class="result-header">
-          <div class="result-count">
-            총 <strong>${totalCount.toLocaleString()}</strong>건 검색됨
-            &nbsp;(${pageNo} / ${totalPages} 페이지)
-          </div>
-          <div class="download-btns">
-            <button class="btn btn-success" onclick="downloadExcel()">📥 Excel 다운로드</button>
-            <button class="btn btn-outline" onclick="downloadCSV()">📄 CSV 다운로드</button>
-          </div>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>No.</th>
-                <th>발명의 명칭</th>
-                <th>출원번호</th>
-                <th>출원일자</th>
-                <th>등록번호</th>
-                <th>등록일자</th>
-                <th>등록상태</th>
-                <th>출원인</th>
-                <th>IPC코드</th>
-                <th>초록</th>
-              </tr>
-            </thead>
-            <tbody>${rows}</tbody>
-          </table>
-        </div>
-        ${pagination}
-      </div>`;
-  }
-
-  // ─── 페이지네이션 ─────────────────────────────────────────
-  function makePagination(current, total) {
-    if (total <= 1) return '';
-    const range = 5;
-    let start = Math.max(1, current - Math.floor(range / 2));
-    let end = Math.min(total, start + range - 1);
-    if (end - start < range - 1) start = Math.max(1, end - range + 1);
-
-    let html = '<div class="pagination">';
-    html += `<button class="page-btn" onclick="doSearch(1)" ${current === 1 ? 'disabled' : ''}>«</button>`;
-    html += `<button class="page-btn" onclick="doSearch(${current - 1})" ${current === 1 ? 'disabled' : ''}>‹</button>`;
-    for (let i = start; i <= end; i++) {
-      html += `<button class="page-btn ${i === current ? 'active' : ''}" onclick="doSearch(${i})">${i}</button>`;
-    }
-    html += `<button class="page-btn" onclick="doSearch(${current + 1})" ${current === total ? 'disabled' : ''}>›</button>`;
-    html += `<button class="page-btn" onclick="doSearch(${total})" ${current === total ? 'disabled' : ''}>»</button>`;
-    html += '</div>';
-    return html;
-  }
-
-  // ─── Excel 다운로드 ──────────────────────────────────────
-  function downloadExcel() {
-    if (!currentResults.length) { alert('다운로드할 데이터가 없습니다.'); return; }
-    const isOverseas = currentMode === 'overseas';
-    const header = isOverseas
-      ? ['No.', '국가', '발명의명칭', '출원번호', '출원일자', '등록번호', '등록일자', '등록상태', '출원인', 'IPC코드', '초록']
-      : ['No.', '발명의명칭', '출원번호', '출원일자', '등록번호', '등록일자', '등록상태', '출원인', 'IPC코드', '초록'];
-    const rows = currentResults.map((r, i) => {
-      const base = [
-        (currentPage - 1) * currentRows + i + 1,
-        r.inventionTitle, r.applicationNumber, r.applicationDate,
-        r.registerNumber, r.registerDate, r.registerStatus,
-        r.applicantName, r.ipcNumber, r.astrtCont
-      ];
-      return isOverseas ? [base[0], r.nation, ...base.slice(1)] : base;
-    });
-    const ws = XLSX.utils.aoa_to_sheet([header, ...rows]);
-    ws['!cols'] = (isOverseas ? [5, 6, 40, 16, 12, 16, 12, 10, 20, 15, 50] : [5, 40, 16, 12, 16, 12, 10, 20, 15, 50]).map(w => ({ wch: w }));
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, '특허검색결과');
-    XLSX.writeFile(wb, `KIPRIS_${isOverseas ? '해외_' : ''}${lastSearchWord}_p${currentPage}.xlsx`);
-  }
-
-  // ─── CSV 다운로드 ─────────────────────────────────────────
-  function downloadCSV() {
-    if (!currentResults.length) { alert('다운로드할 데이터가 없습니다.'); return; }
-    const isOverseas = currentMode === 'overseas';
-    const header = isOverseas
-      ? ['No.', '국가', '발명의명칭', '출원번호', '출원일자', '등록번호', '등록일자', '등록상태', '출원인', 'IPC코드', '초록']
-      : ['No.', '발명의명칭', '출원번호', '출원일자', '등록번호', '등록일자', '등록상태', '출원인', 'IPC코드', '초록'];
-    const csvRows = [header, ...currentResults.map((r, i) => {
-      const base = [
-        (currentPage - 1) * currentRows + i + 1,
-        r.inventionTitle, r.applicationNumber, r.applicationDate,
-        r.registerNumber, r.registerDate, r.registerStatus,
-        r.applicantName, r.ipcNumber, r.astrtCont
-      ];
-      return isOverseas ? [base[0], r.nation, ...base.slice(1)] : base;
-    })].map(row => row.map(v => `"${(v || '').toString().replace(/"/g, '""')}"`).join(','));
-    const bom = '\uFEFF';
-    const blob = new Blob([bom + csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `KIPRIS_${isOverseas ? '해외_' : ''}${lastSearchWord}_p${currentPage}.csv`;
-    a.click();
-    URL.revokeObjectURL(a.href);
-  }
-
-  // ─── 유틸 ────────────────────────────────────────────────
-  function getXmlText(node, tag) {
-    const el = node.querySelector(tag);
-    return el ? el.textContent.trim() : '';
-  }
-
-  function formatDate(raw) {
-    if (!raw) return '';
-    // YYYYMMDD 형식
-    const m8 = raw.match(/^(\d{4})(\d{2})(\d{2})$/);
-    if (m8) return `${m8[1]}-${m8[2]}-${m8[3]}`;
-    // YYYY/MM/DD or YYYY-MM-DD 형식
-    const m = raw.match(/(\d{4})[\/\-](\d{2})[\/\-](\d{2})/);
-    return m ? `${m[1]}-${m[2]}-${m[3]}` : raw;
-  }
-
-  function escHtml(str) {
-    if (!str) return '';
-    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-  }
-
-  function makeStatusBadge(status) {
-    if (!status) return '-';
-    const cls = status.includes('등록') ? 'badge-reg'
-              : status.includes('공개') ? 'badge-open'
-              : status.includes('소멸') || status.includes('거절') ? 'badge-dismiss'
-              : 'badge-default';
-    return `<span class="badge ${cls}">${escHtml(status)}</span>`;
-  }
-
-  function toggleAbstract(el) {
-    el.classList.toggle('expanded');
-  }
-
-  function showLoading() {
-    document.getElementById('resultArea').innerHTML = `
-      <div class="result-box">
-        <div class="loading-wrap">
-          <div class="spinner"></div>
-          <span>특허 데이터를 불러오는 중...</span>
-        </div>
-      </div>`;
-  }
-
-  function showError(err, url) {
-    const isCors = err.message && (err.message.includes('Failed to fetch') || err.message.includes('NetworkError'));
-    let msg = `<div class="error-box">
-      <strong>⚠️ 오류가 발생했습니다.</strong><br><br>
-      오류 내용: <code>${escHtml(err.message)}</code><br><br>`;
-
-    if (isCors) {
-      msg += `<strong>CORS 오류일 가능성이 높습니다.</strong> 브라우저에서 직접 파일을 열면 API 호출이 차단될 수 있습니다.<br><br>
-      <strong>해결 방법:</strong><br>
-      1. 터미널에서 <code>python -m http.server 8080</code> 실행 후 <code>http://localhost:8080/kipris_search.html</code>로 접속<br>
-      2. VS Code의 Live Server 확장으로 실행<br>
-      3. Chrome을 <code>--disable-web-security --user-data-dir=/tmp/chrome_dev</code> 옵션으로 실행 (개발용)`;
-    }
-
     msg += `</div>`;
     document.getElementById('resultArea').innerHTML = msg;
     document.getElementById('noticeArea').innerHTML = '';
