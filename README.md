@@ -1,6 +1,7 @@
 # KIPRIS 특허·실용신안 검색 도구
 
-한국 특허청 **KIPRIS Plus REST API**를 활용하여 특허·실용신안 정보를 검색하고 Excel/CSV로 내보낼 수 있는 로컬 웹 도구입니다.
+한국 특허청 **KIPRIS Plus REST API**를 활용하여 특허·실용신안 정보를 검색하고 Excel/CSV로 내보낼 수 있는 로컬 웹 도구입니다.  
+**Gemini API 키를 입력하면 AI가 초록을 분석하여 핵심 요약과 주요 키워드를 자동으로 추출합니다.**
 
 ---
 
@@ -83,7 +84,7 @@ GET http://plus.kipris.or.kr/kipo-api/kipi/patUtiModInfoSearchSevice/getAdvanced
 | `lastvalue` | 행정처분 상태 | `R`(등록) / `A`(공개) / `C`(취하) / `F`(소멸) / `G`(포기) / `I`(무효) / `J`(거절) |
 | `patent` | 특허 포함 여부 | `true` / `false` |
 | `utility` | 실용신안 포함 여부 | `true` / `false` |
-| `numOfRows` | 페이지당 결과 수 | `30` / `50` / `100` / `500` |
+| `numOfRows` | 페이지당 결과 수 | `10` / `30` / `50` / `100` / `500` |
 | `pageNo` | 페이지 번호 | `1` |
 | `sortSpec` | 정렬 기준 | `AD`(출원일) / `GD`(등록일) / `PD`(공고일) / `OPD`(공개일) |
 | `descSort` | 내림차순 여부 | `true` |
@@ -141,7 +142,16 @@ GET http://plus.kipris.or.kr/kipo-api/kipi/patUtiModInfoSearchSevice/getAdvanced
 2. 마이페이지 → 서비스 키 발급
 3. 발급된 키를 검색 화면의 **서비스 키** 필드에 입력 (브라우저에 자동 저장됨)
 
-### 2. 서버 실행
+### 2. (선택) Gemini API 키 발급
+
+AI 기반 초록 요약 및 키워드 추출 기능을 사용하려면 Gemini API 키가 필요합니다.
+
+1. [Google AI Studio](https://aistudio.google.com/app/apikey)에서 API 키 발급
+2. 검색 화면의 **Gemini API 키** 필드에 입력 (브라우저에 자동 저장됨)
+
+> 입력하지 않으면 빈도 기반 단순 키워드 추출 방식으로 동작합니다.
+
+### 3. 서버 실행
 
 ```bash
 cd c:\work\260420_KiprisSearch
@@ -153,7 +163,7 @@ python server.py
    종료하려면 Ctrl+C 를 누르세요.
 ```
 
-### 3. 브라우저 접속
+### 4. 브라우저 접속
 
 ```
 http://localhost:8080/kipris_search.html
@@ -200,7 +210,16 @@ http://localhost:8080/kipris_search.html
   ├─ 발명 명칭 → KIPRIS 검색 결과 링크로 연결
   │     https://kipris.or.kr/khome/search/searchResult.do
   │     ?searchLogicCode=OR&searchKeyword={출원번호}&collection=KR_PATENT
-  └─ 테이블 렌더링 + 페이지네이션
+  ├─ 테이블 렌더링 + 페이지네이션
+  │
+  └─ [Gemini API 키 입력 시] extractAllKeywordsWithGemini() 비동기 실행
+       │
+       │ 각 행마다 순차 호출 (300ms 간격)
+       │ POST https://generativelanguage.googleapis.com/v1beta/models/
+       │      gemini-2.5-flash:generateContent
+       │ → JSON 응답 { summary, keywords[] }
+       ├─ 핵심 요약 셀(sum-i) 업데이트
+       └─ 주요 키워드 셀(kw-i) 업데이트
 ```
 
 ---
@@ -212,12 +231,16 @@ http://localhost:8080/kipris_search.html
 | 다중 조건 검색 | 자유검색어, 발명명칭, 출원인, 행정처분 상태 조합 |
 | 특허/실용신안 선택 | 체크박스로 포함 여부 선택 |
 | 정렬 기준 선택 | 출원일·등록일·공고일·공개일 기준 내림차순 |
-| 페이지네이션 | 30/50/100/500건 단위, 이전/다음/처음/끝 버튼 |
+| 페이지네이션 | 10/30/50/100/500건 단위, 이전/다음/처음/끝 버튼 |
 | 초록 펼치기 | 초록 클릭 시 전체 내용 토글 표시 |
 | KIPRIS 링크 | 발명 명칭 클릭 → KIPRIS 검색 결과 페이지로 이동 |
-| Excel 다운로드 | SheetJS(XLSX) 라이브러리로 현재 페이지 결과 저장 |
-| CSV 다운로드 | UTF-8 BOM 포함, Excel 한글 호환 |
+| **AI 핵심 요약** | Gemini 2.5 Flash로 초록을 2문장 이내로 요약 |
+| **AI 주요 키워드** | Gemini 2.5 Flash로 핵심 기술 키워드 최대 7개 추출 |
+| 폴백 키워드 추출 | Gemini 키 미입력 시 빈도 기반 한글 키워드 자동 추출 |
+| Excel 다운로드 | SheetJS(XLSX) 라이브러리로 현재 페이지 결과 저장 (핵심요약·주요키워드 포함) |
+| CSV 다운로드 | UTF-8 BOM 포함, Excel 한글 호환 (핵심요약·주요키워드 포함) |
 | 서비스 키 저장 | `localStorage`에 자동 저장, 재방문 시 자동 복원 |
+| Gemini 키 저장 | `localStorage`에 자동 저장, 재방문 시 자동 복원 |
 
 ---
 
@@ -230,4 +253,5 @@ http://localhost:8080/kipris_search.html
 | Excel 출력 | [SheetJS (xlsx 0.18.5)](https://sheetjs.com/) CDN |
 | 백엔드(프록시) | Python 3 표준 라이브러리 (`http.server`, `urllib`) |
 | 외부 의존성 | 없음 (Python 추가 패키지 설치 불필요) |
-| API | KIPRIS Plus REST API (XML 응답) |
+| KIPRIS API | KIPRIS Plus REST API (XML 응답) |
+| AI 분석 | Google Gemini 2.5 Flash API (JSON mode) |
