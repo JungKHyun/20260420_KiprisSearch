@@ -568,8 +568,9 @@
     }
     const data = await res.json();
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    const cleanText = text.replace(/```json/g, '').replace(/```/g, '').trim(); // 마크다운 기호 제거
     try {
-      const parsed = JSON.parse(text);
+      const parsed = JSON.parse(cleanText);
       return {
         summary: parsed.summary || '',
         keywords: (parsed.keywords || []).slice(0, 7)
