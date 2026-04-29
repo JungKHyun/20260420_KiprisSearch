@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/kipris",
+      "destination": "http://plus.kipris.or.kr/kipo-api/kipi/patUtiModInfoSearchSevice/getAdvancedSearch"
+    }
+  ]
+}

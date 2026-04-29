@@ -1,7 +1,7 @@
 """
 KIPRIS 검색 프록시 서버
 실행: python server.py
-접속: http://localhost:8080/kipris_search.html
+접속: http://localhost:8080/ (또는 http://localhost:8080/index.html)
 """
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 import urllib.request
@@ -56,7 +56,7 @@ class KiprisProxyHandler(SimpleHTTPRequestHandler):
 if __name__ == '__main__':
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
     server = HTTPServer(('localhost', PORT), KiprisProxyHandler)
-    print(f"✅ 서버 시작: http://localhost:{PORT}/kipris_search.html")
+    print(f"✅ 서버 시작: http://localhost:{PORT}/")
     print("   종료하려면 Ctrl+C 를 누르세요.\n")
     try:
         server.serve_forever()
