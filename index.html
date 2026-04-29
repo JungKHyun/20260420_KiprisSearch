@@ -253,6 +253,7 @@
   let currentTotal = 0;
   let currentRows = 30;
   let lastSearchWord = '';
+  let stopGemini = false;
 
   const API_BASE = '/api/kipris';
 
@@ -272,6 +273,7 @@
 
   // ─── 검색 실행 ────────────────────────────────────────────
   async function doSearch(pageNo) {
+    stopGemini = false;
     const word = document.getElementById('word').value.trim();
     const inventionTitle = document.getElementById('inventionTitle').value.trim();
     const applicant = document.getElementById('applicant').value.trim();
@@ -426,6 +428,7 @@
             &nbsp;(${pageNo} / ${totalPages} 페이지)
           </div>
           <div class="download-btns">
+            ${useGemini ? `<button id="stopGeminiBtn" class="btn btn-outline" style="border-color:#e53935;color:#e53935;" onclick="stopGemini=true;this.disabled=true;this.innerText='🛑 정지됨';">🛑 AI 요약 멈춤</button>` : ''}
             <button class="btn btn-success" onclick="downloadExcel()">📥 Excel 다운로드</button>
             <button class="btn btn-outline" onclick="downloadCSV()">📄 CSV 다운로드</button>
           </div>
@@ -589,6 +592,7 @@
 
   async function extractAllKeywordsWithGemini(results, apiKey) {
     for (let i = 0; i < results.length; i++) {
+      if (stopGemini) break;
       const sumCell = document.getElementById(`sum-${i}`);
       const kwCell = document.getElementById(`kw-${i}`);
       if (!sumCell && !kwCell) continue;
@@ -607,6 +611,8 @@
       }
       if (i < results.length - 1) await new Promise(r => setTimeout(r, 1500));
     }
+    const stopBtn = document.getElementById('stopGeminiBtn');
+    if (stopBtn) stopBtn.style.display = 'none';
   }
 
   // ─── 키워드 추출 (폴백) ────────────────────────────────────────────────────────────────
