@@ -394,7 +394,7 @@
     const useGemini = !!document.getElementById('geminiKey').value.trim();
     const rows = results.map((r, i) => {
       const statusBadge = makeStatusBadge(r.registerStatus);
-      const ipcChips = r.ipcNumber ? r.ipcNumber.split('|').map(c => `<span class="chip">${c.trim()}</span>`).join('') : '-';
+        const ipcChips = r.ipcNumber ? r.ipcNumber.split('|').map(c => `<span class="chip" style="cursor:pointer;" onclick="showIpcDesc('${c.trim()}')" title="클릭하여 IPC 코드 설명 보기">${c.trim()}</span>`).join('') : '-';
       const titleText = escHtml(r.inventionTitle) || '-';
       const titleCell = r.applicationNumber
         ? `<a href="https://kipris.or.kr/khome/search/searchResult.do?searchLogicCode=OR&searchKeyword=${encodeURIComponent(r.applicationNumber)}&collection=KR_PATENT" target="_blank" title="${titleText}">${titleText}</a>`
@@ -678,6 +678,64 @@
     const html = escHtml(msg).replace(/\n/g, '<br>');
     document.getElementById('resultArea').innerHTML = `<div class="result-box"><div class="error-box">⚠️ ${html}</div></div>`;
   }
-</script>
+  // ─── IPC 코드 사전 검색 기능 (IpcCodeIndex.xml 매핑) ────────────────────────────────
+  let ipcDictionary = null;
+  
+  async function showIpcDesc(fullCode) {
+    const codeGroup = fullCode.substring(0, 4).toUpperCase();
+    if (!/^[A-Z]\d{2}[A-Z]$/.test(codeGroup)) {
+      alert(`해당 코드 [${fullCode}] 의 앞 4자리 [${codeGroup}] 가 올바른 IPC 코드 형식이 아닙니다.`);
+      return;
+    }
+
+    if (!ipcDictionary) {
+      const target = window.event ? window.event.target : null;
+      let btnText = target ? target.innerText : '';
+      
+      try {
+        if (target) target.innerText = '로딩중...';
+        const res = await fetch('IpcCodeIndex.xml');
+        if (!res.ok) throw new Error('Failed to fetch XML');
+        const text = await res.text();
+        
+        ipcDictionary = {};
+        const entries = text.split('<CWIndication>');
+        for (let i = 1; i < entries.length; i++) {
+          const chunk = entries[i];
+          const indEnd = chunk.indexOf('</CWIndication>');
+          if (indEnd === -1) continue;
+          
+          const indication = chunk.substring(0, indEnd).trim();
+          const refMatches = chunk.match(/(?:ref="|endRef=")[A-Z]\d{2}[A-Z]/g);
+          if (refMatches) {
+            for (let m of refMatches) {
+              const c = m.substring(m.length - 4);
+              if (!ipcDictionary[c]) ipcDictionary[c] = new Set();
+              ipcDictionary[c].add(indication);
+            }
+          }
+        }
+        if (target) target.innerText = btnText;
+      } catch (err) {
+        console.error(err);
+        if (target) target.innerText = fullCode;
+        alert("IPC 코드 사전 파일(IpcCodeIndex.xml)을 불러오는데 실패했습니다.");
+        return;
+      }
+    }
+
+    const descSet = ipcDictionary[codeGroup];
+    if (!descSet || descSet.size === 0) {
+      alert(`사전에서 연관된 키워드를 찾지 못했습니다.\n- 검색된 4자리 코드: ${codeGroup} (원본: ${fullCode})`);
+    } else {
+      const list = Array.from(descSet).slice(0, 20); // 최대 20개 표시
+      const extraCount = descSet.size > 20 ? descSet.size - 20 : 0;
+      let msg = `■ IPC 코드 [${fullCode}] (검색기준: ${codeGroup}) 설명\n\n`;
+      msg += `이 코드와 관련된 WIPO 키워드들입니다:\n`;
+      msg += list.map(item => `  - ${item}`).join('\n');
+      if (extraCount > 0) msg += `\n  ... 외 ${extraCount}개의 키워드`;
+      alert(msg);
+    }
+  }</script>
 </body>
 </html>
