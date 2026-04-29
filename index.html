@@ -549,7 +549,7 @@
   // ─── Gemini AI 요약+키워드 추출 ──────────────────────────────────────────────────────────
   async function extractWithGemini(abstract, apiKey) {
     if (!abstract) return { summary: '', keywords: [] };
-    const prompt = `다음 특허 초록을 분석하여 summary(2문장 이내 핵심 요약)와 keywords(핵심 기술 키워드 최대 7개 배열)를 JSON으로 반환하세요.\n\n초록:\n${abstract}`;
+    const prompt = `다음 특허 초록을 분석하여 2문장 이내의 핵심 요약(summary)과 핵심 기술 키워드 최대 7개(keywords 배열)를 추출하세요.\n\n초록:\n${abstract}`;
     const res = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(apiKey)}`,
       {
@@ -560,7 +560,15 @@
           generationConfig: {
             maxOutputTokens: 1024,
             temperature: 0.1,
-            responseMimeType: 'application/json'
+            responseMimeType: 'application/json',
+            responseSchema: {
+              type: 'object',
+              properties: {
+                summary: { type: 'string' },
+                keywords: { type: 'array', items: { type: 'string' } }
+              },
+              required: ['summary', 'keywords']
+            }
           }
         })
       }
@@ -570,21 +578,38 @@
       throw new Error(`Gemini ${res.status}${errText ? ': ' + errText.slice(0, 100) : ''}`);
     }
     const data = await res.json();
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    const cleanText = text.replace(/```json/g, '').replace(/```/g, '').trim(); // 마크다운 기호 제거
+    const candidate = data.candidates?.[0];
+    if (!candidate) throw new Error('Gemini 응답이 비어 있습니다 (candidates 없음)');
+    let text = candidate.content?.parts?.[0]?.text || '';
+
+    // 마크다운 코드블록 제거 후 { } 범위만 추출
+    let cleanText = text.replace(/```json/gi, '').replace(/```/g, '').trim();
+    const firstBrace = cleanText.indexOf('{');
+    const lastBrace = cleanText.lastIndexOf('}');
+    if (firstBrace !== -1 && lastBrace > firstBrace) {
+      cleanText = cleanText.substring(firstBrace, lastBrace + 1);
+    }
+
     try {
       const parsed = JSON.parse(cleanText);
+      let kws = parsed.keywords ?? [];
+      // 모델이 배열 대신 문자열로 반환할 때 처리
+      if (typeof kws === 'string') {
+        kws = kws.split(/[,，、\n]/).map(k => k.trim()).filter(k => k.length > 0);
+      }
+      if (!Array.isArray(kws)) kws = [];
       return {
-        summary: parsed.summary || '',
-        keywords: (parsed.keywords || []).slice(0, 7)
+        summary: typeof parsed.summary === 'string' ? parsed.summary : '',
+        keywords: kws.slice(0, 7)
       };
     } catch (e) {
-      // JSON 파싱 실패 시 정규식으로 폴백 추출
-      const sumMatch = text.match(/"summary"\s*:\s*"((?:[^"\\]|\\.)*?)"/);
-      const kwMatch = text.match(/"keywords"\s*:\s*\[([^\]]*?)\]/);
+      // 마지막 수단: 정규식으로 직접 추출
+      const sumMatch = text.match(/"summary"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+      const kwMatch = text.match(/"keywords"\s*:\s*\[([^\]]*)\]/);
       const summary = sumMatch ? sumMatch[1].replace(/\\n/g, ' ').replace(/\\"/g, '"') : '';
       const keywords = kwMatch
-        ? kwMatch[1].match(/"((?:[^"\\]|\\.)*?)"/g)?.map(k => k.replace(/^"|"$/g, '').replace(/\\"/g, '"')).slice(0, 7) || []
+        ? (kwMatch[1].match(/"((?:[^"\\]|\\.)*)"/g) || [])
+            .map(k => k.slice(1, -1).replace(/\\"/g, '"')).slice(0, 7)
         : [];
       return { summary, keywords };
     }
