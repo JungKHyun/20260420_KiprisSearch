@@ -1,257 +1,80 @@
-# KIPRIS 특허·실용신안 검색 도구
+﻿# KIPRIS 특허·실용신안 AI 검색 분석 도구
 
-한국 특허청 **KIPRIS Plus REST API**를 활용하여 특허·실용신안 정보를 검색하고 Excel/CSV로 내보낼 수 있는 로컬 웹 도구입니다.
-**Gemini API 키를 입력하면 AI가 초록을 분석하여 핵심 요약과 주요 키워드를 자동으로 추출합니다.**
+한국 특허청 **KIPRIS Plus REST API**를 활용하여 특허·실용신안 정보를 검색 및 엑셀(CSV)로 내보내고, **구글 Gemini AI**를 통해 특허 초록을 자동으로 요약/키워드 추출해주는 웹 기반 분석 도구입니다.
 
----
-
-## 프로젝트 구성
-
-```
-260420_KiprisSearch/
-├── kipris_search.html   # 검색 UI (단일 파일 프론트엔드)
-├── server.py            # Python CORS 프록시 + 정적 파일 서버
-└── README.md            # 이 문서
-```
+본 프로젝트는 기업 R&D 연구원들의 특허 분석 역량 강화 강의 및 실습용으로 제작되었으며, 사내 망분리 및 강력한 보안 환경(EDR 등)에서도 문제없이 사용할 수 있도록 **설치 없는 웹 배포(Vercel/Netlify)** 방식에 최적화되어 있습니다.
 
 ---
 
-## 시스템 흐름도
+## 📂 프로젝트 구성
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         사용자 PC                               │
-│                                                                 │
-│  ┌──────────────────────┐      ┌───────────────────────────┐   │
-│  │   브라우저           │      │   Python 프록시 서버       │   │
-│  │  kipris_search.html  │      │   server.py (port 8080)   │   │
-│  │                      │      │                           │   │
-│  │  1. 검색 조건 입력   │      │  KiprisProxyHandler       │   │
-│  │  2. fetch() 호출     │─────▶│  /api/kipris?...          │   │
-│  │     ↓                │      │       ↓                   │   │
-│  │  /api/kipris?...     │      │  urllib.request로         │   │
-│  │  (same-origin)       │      │  외부 API 호출            │   │
-│  │                      │◀─────│       ↓                   │   │
-│  │  3. XML 수신         │      │  XML 응답 그대로 반환     │   │
-│  │  4. DOMParser 파싱   │      │  + CORS 헤더 추가         │   │
-│  │  5. 테이블 렌더링    │      └───────────────────────────┘   │
-│  └──────────────────────┘                  │                   │
-└────────────────────────────────────────────┼───────────────────┘
-                                             │ HTTP (외부망)
-                                             ▼
-                        ┌────────────────────────────────────┐
-                        │   KIPRIS Plus API 서버              │
-                        │   plus.kipris.or.kr                │
-                        │                                    │
-                        │  patUtiModInfoSearchSevice         │
-                        │  /getAdvancedSearch                │
-                        │                                    │
-                        │  응답 형식: XML                    │
-                        └────────────────────────────────────┘
-```
+`	ext 260420_KiprisSearch/ ├── index.html       # 메인 검색 UI 및 API 통신 로직 (프론트엔드) ├── vercel.json      # Vercel 웹 호스팅 배포용 프록시(CORS 우회) 설정 ├── netlify.toml     # Netlify 웹 호스팅 배포용 프록시(CORS 우회) 설정 ├── server.py        # 로컬 환경 테스트용 Python 프록시 서버 ├── README.md        # 프로젝트 설명서 (현재 파일) └── 사전자료/         # 기타 강의 및 참고 자료 `
 
 ---
 
-## 왜 Python 프록시 서버가 필요한가?
+## 🚀 배포 및 실행 방법
 
-브라우저는 **동일 출처 정책(Same-Origin Policy)** 에 의해 다른 도메인으로의 직접 API 호출을 차단합니다.
+사내 보안 프로그램(방화벽, 백신 등)으로 인해 \.exe\ 실행 파일 배포가 어려운 환경을 고려하여, **무료 웹 호스팅(Vercel, Netlify)을 통한 1분 배포** 방식을 적극 권장합니다.
 
-| 방식                                  | 요청 출처          | API 출처              | CORS 오류 |
-| ------------------------------------- | ------------------ | --------------------- | --------- |
-| HTML 파일 직접 열기 (`file://`)     | `file://`        | `plus.kipris.or.kr` | ❌ 차단됨 |
-| Python 서버 경유 (`localhost:8080`) | `localhost:8080` | `localhost:8080`    | ✅ 통과   |
+### 추천 방식 1: Vercel로 무료 배포하기 (가장 간단함)
 
-Python 서버는 **같은 출처(localhost:8080)** 에서 HTML을 서빙하고, `/api/kipris` 경로로 들어온 요청을 외부 KIPRIS API로 **중계(proxy)** 합니다.
+1. 현재 폴더 전체를 본인의 GitHub 계정에 새 레포지토리로 Push합니다.
+2. [Vercel 사이트](https://vercel.com/)에 GitHub 계정으로 로그인합니다.
+3. 대시보드에서 \[Add New...] -> [Project]\를 클릭하고, 방금 올린 레포지토리를 \[Import]\ 합니다.
+4. 추가 설정 없이 하단의 \[Deploy]\ 버튼을 클릭합니다.
+5. 1~2분 뒤 생성되는 고유 URL을 수강생(연구원)들에게 공유하면 끝입니다.
+   > *\ercel.json\ 파일이 KIPRIS API의 CORS 방어벽을 자동으로 우회해 줍니다.*
+   >
 
----
+### 추천 방식 2: Netlify로 무료 배포하기
 
-## API 명세
+1. [Netlify 사이트](https://app.netlify.com/)에 가입 후 로그인합니다.
+2. 대시보드에서 \[Add new site] -> [Deploy manually]\를 선택합니다.
+3. 내 PC의 \260420_KiprisSearch\ 폴더를 화면에 드래그 앤 드롭합니다.
+4. 즉시 고유 URL이 생성되며 배포가 완료됩니다.
+   >
+   >
 
-### 엔드포인트
+### 방식 3: 로컬 PC에서 직접 실행 (보조/테스트 용도)
 
-```
-GET http://plus.kipris.or.kr/kipo-api/kipi/patUtiModInfoSearchSevice/getAdvancedSearch
-```
+웹 호스팅을 사용하지 않고 로컬 PC에서 직접 띄워볼 경우, 파이썬 서버를 활용합니다.
+\\\ash
 
-### 요청 파라미터
+# 터미널에서 아래 명령어 실행
 
-| 파라미터           | 설명                              | 예시                                                                                            |
-| ------------------ | --------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `ServiceKey`     | KIPRIS Plus 발급 서비스 키 (필수) | `abc123...`                                                                                   |
-| `word`           | 자유 검색어 (전체 필드)           | `인공지능`                                                                                    |
-| `inventionTitle` | 발명의 명칭 키워드                | `배터리`                                                                                      |
-| `applicant`      | 출원인명 또는 특허고객번호        | `삼성전자`                                                                                    |
-| `lastvalue`      | 행정처분 상태                     | `R`(등록) / `A`(공개) / `C`(취하) / `F`(소멸) / `G`(포기) / `I`(무효) / `J`(거절) |
-| `patent`         | 특허 포함 여부                    | `true` / `false`                                                                            |
-| `utility`        | 실용신안 포함 여부                | `true` / `false`                                                                            |
-| `numOfRows`      | 페이지당 결과 수                  | `10` / `30` / `50` / `100` / `500`                                                    |
-| `pageNo`         | 페이지 번호                       | `1`                                                                                           |
-| `sortSpec`       | 정렬 기준                         | `AD`(출원일) / `GD`(등록일) / `PD`(공고일) / `OPD`(공개일)                              |
-| `descSort`       | 내림차순 여부                     | `true`                                                                                        |
-
-### 응답 형식 (XML)
-
-```xml
-<response>
-  <header>
-    <resultCode>00</resultCode>
-    <resultMsg>NORMAL SERVICE.</resultMsg>
-  </header>
-  <body>
-    <items>
-      <item>
-        <inventionTitle>발명의 명칭</inventionTitle>
-        <applicationNumber>1020230012345</applicationNumber>
-        <applicationDate>20230101</applicationDate>
-        <registerNumber>1012345670000</registerNumber>
-        <registerDate>20240601</registerDate>
-        <registerStatus>등록</registerStatus>
-        <applicantName>출원인명</applicantName>
-        <ipcNumber>A01B0001000|G06F0001000</ipcNumber>
-        <astrtCont>초록 내용...</astrtCont>
-      </item>
-      ...
-    </items>
-    <totalCount>1234</totalCount>
-  </body>
-</response>
-```
-
-### API 오류 코드
-
-| 코드   | 의미                    | 조치                                   |
-| ------ | ----------------------- | -------------------------------------- |
-| `00` | 정상                    | -                                      |
-| `10` | 필수 파라미터 누락      | 요청 파라미터 확인                     |
-| `11` | 파라미터 값 오류        | 파라미터 형식 확인                     |
-| `20` | 미등록 서비스 키        | KIPRIS Plus에서 키 확인                |
-| `21` | 서비스 키 일시 중지     | KIPRIS Plus 문의                       |
-| `22` | 요청 횟수 초과          | 일일 한도 초과, 다음날 재시도          |
-| `30` | 인증 실패               | 서비스 키 재확인                       |
-| `31` | 서비스 키 유효기간 만료 | KIPRIS Plus 마이페이지에서 연장/재발급 |
-| `32` | 미등록 IP               | IP 허용 설정 확인                      |
-| `99` | 서버 내부 오류          | 잠시 후 재시도                         |
-
----
-
-## 실행 방법
-
-### 1. 서비스 키 발급
-
-1. [KIPRIS Plus](https://plus.kipris.or.kr) 회원가입 및 로그인
-2. 마이페이지 → 서비스 키 발급
-3. 발급된 키를 검색 화면의 **서비스 키** 필드에 입력 (브라우저에 자동 저장됨)
-
-### 2. (선택) Gemini API 키 발급
-
-AI 기반 초록 요약 및 키워드 추출 기능을 사용하려면 Gemini API 키가 필요합니다.
-
-1. [Google AI Studio](https://aistudio.google.com/app/apikey)에서 API 키 발급
-2. 검색 화면의 **Gemini API 키** 필드에 입력 (브라우저에 자동 저장됨)
-
-> 입력하지 않으면 빈도 기반 단순 키워드 추출 방식으로 동작합니다.
-
-### 3. 서버 실행
-
-```bash
-cd c:\work\260420_KiprisSearch
 python server.py
-```
 
-```
-✅ 서버 시작: http://localhost:8080/kipris_search.html
-   종료하려면 Ctrl+C 를 누르세요.
-```
+# 브라우저에서 접속: http://localhost:8080/
 
-### 4. 브라우저 접속
-
-```
-http://localhost:8080/kipris_search.html
-```
+\\\
 
 ---
 
-## 검색 → 결과 처리 상세 흐름
+## 🔑 필수 준비물 (수강생 안내 사항)
 
-```
-[사용자]
-  │
-  │ 검색 조건 입력 (키워드, 출원인, 상태, 정렬 등)
-  │ 서비스 키는 localStorage에 자동 저장/복원
-  ▼
-[kipris_search.html - doSearch()]
-  │
-  │ URLSearchParams로 쿼리스트링 생성
-  │ fetch('/api/kipris?word=...&ServiceKey=...&...')
-  ▼
-[server.py - KiprisProxyHandler._proxy_kipris()]
-  │
-  │ 쿼리스트링을 그대로 추출
-  │ urllib.request로 KIPRIS Plus API 호출
-  │   → GET http://plus.kipris.or.kr/.../getAdvancedSearch?...
-  ▼
-[KIPRIS Plus API 서버]
-  │
-  │ XML 응답 반환
-  ▼
-[server.py]
-  │
-  │ XML 데이터 + CORS 헤더(Access-Control-Allow-Origin: *)
-  │ 그대로 브라우저로 전달
-  ▼
-[kipris_search.html - parseAndRender()]
-  │
-  ├─ DOMParser로 XML 파싱
-  ├─ resultCode 확인 → 오류 시 한국어 안내 표시
-  ├─ <item> 요소 순회 → 데이터 배열 생성
-  │     (inventionTitle, applicationNumber, applicationDate,
-  │      registerNumber, registerDate, registerStatus,
-  │      applicantName, ipcNumber, astrtCont)
-  ├─ 발명 명칭 → KIPRIS 검색 결과 링크로 연결
-  │     https://kipris.or.kr/khome/search/searchResult.do
-  │     ?searchLogicCode=OR&searchKeyword={출원번호}&collection=KR_PATENT
-  ├─ 테이블 렌더링 + 페이지네이션
-  │
-  └─ [Gemini API 키 입력 시] extractAllKeywordsWithGemini() 비동기 실행
-       │
-       │ 각 행마다 순차 호출 (300ms 간격)
-       │ POST https://generativelanguage.googleapis.com/v1beta/models/
-       │      gemini-2.5-flash:generateContent
-       │ → JSON 응답 { summary, keywords[] }
-       ├─ 핵심 요약 셀(sum-i) 업데이트
-       └─ 주요 키워드 셀(kw-i) 업데이트
-```
+검색기 접속 URL과 더불어, 수강생들이 각자 아래의 무료 API 키 2개를 발급받아 화면 상단에 입력해야 정상적으로 기능이 작동합니다.
+*(입력한 키 값은 서버로 전송되지 않고, 사용자 PC 브라우저의 LocalStorage에 안전하게 저장됩니다.)*
+
+1. **KIPRIS Plus API Key (특허 검색용)**
+   - [KIPRIS Plus](https://plus.kipris.or.kr) 회원가입 및 로그인
+   - 마이페이지 → \[특허·실용신안] 발명의명칭,출원인,초록,청구항 등 검색\ 서비스 키 발급
+2. **Google Gemini API Key (초록 요약 및 AI 키워드 추출용)**
+   - [Google AI Studio](https://aistudio.google.com/app/apikey) 접속 (구글 계정 로그인)
+   - \[Create API key]\ 버튼 클릭 후 키 복사
+
+   > **⚠️ 주의 (503 에러 관련)**: 무료 요금제의 경우 짧은 시간에 과도한 요청 시 과부하(503) 차단이 발생할 수 있습니다. 이를 방지하기 위해 본 코드(\index.html\)에는 1개 특허 분석마다 **1.5초(1500ms)** 의 대기 시간(Delay)이 적용되어 있습니다.
+   >
 
 ---
 
-## 주요 기능
+## ⚙️ 아키텍처 및 해결 과제 (CORS 프록시)
 
-| 기능                     | 설명                                                                         |
-| ------------------------ | ---------------------------------------------------------------------------- |
-| 다중 조건 검색           | 자유검색어, 발명명칭, 출원인, 행정처분 상태 조합                             |
-| 특허/실용신안 선택       | 체크박스로 포함 여부 선택                                                    |
-| 정렬 기준 선택           | 출원일·등록일·공고일·공개일 기준 내림차순                                 |
-| 페이지네이션             | 10/30/50/100/500건 단위, 이전/다음/처음/끝 버튼                              |
-| 초록 펼치기              | 초록 클릭 시 전체 내용 토글 표시                                             |
-| KIPRIS 링크              | 발명 명칭 클릭 → KIPRIS 검색 결과 페이지로 이동                             |
-| **AI 핵심 요약**   | Gemini 2.5 Flash로 초록을 2문장 이내로 요약                                  |
-| **AI 주요 키워드** | Gemini 2.5 Flash로 핵심 기술 키워드 최대 7개 추출                            |
-| 폴백 키워드 추출         | Gemini 키 미입력 시 빈도 기반 한글 키워드 자동 추출                          |
-| Excel 다운로드           | SheetJS(XLSX) 라이브러리로 현재 페이지 결과 저장 (핵심요약·주요키워드 포함) |
-| CSV 다운로드             | UTF-8 BOM 포함, Excel 한글 호환 (핵심요약·주요키워드 포함)                  |
-| 서비스 키 저장           | `localStorage`에 자동 저장, 재방문 시 자동 복원                            |
-| Gemini 키 저장           | `localStorage`에 자동 저장, 재방문 시 자동 복원                            |
+일반적인 웹 브라우저는 보안상의 이유(Same-Origin Policy)로 인해, 스크립트(\index.html\)가 다른 도메인(\kipris.or.kr\)의 데이터를 직접 가져오는 것을(CORS) 차단합니다.
 
----
+이를 해결하기 위해 본 프로젝트는 환경에 맞는 3가지 프록시 라우팅을 기본 내장하고 있습니다.
 
-## 기술 스택
+* **Vercel 배포 시**: \ercel.json\ 내의 ewrites\ 규칙이 미들웨어 역할을 함.
+* **Netlify 배포 시**: etlify.toml\ 내의 \[[redirects]]\ 규칙이 미들웨어 역할을 함.
+* **로컬 실행 시**: \server.py\의 \KiprisProxyHandler\가 미들웨어 역할을 함.
 
-| 구성 요소      | 기술                                                   |
-| -------------- | ------------------------------------------------------ |
-| 프론트엔드     | HTML5 / CSS3 / Vanilla JavaScript                      |
-| XML 파싱       | 브라우저 내장 `DOMParser`                            |
-| Excel 출력     | [SheetJS (xlsx 0.18.5)](https://sheetjs.com/) CDN         |
-| 백엔드(프록시) | Python 3 표준 라이브러리 (`http.server`, `urllib`) |
-| 외부 의존성    | 없음 (Python 추가 패키지 설치 불필요)                  |
-| KIPRIS API     | KIPRIS Plus REST API (XML 응답)                        |
-| AI 분석        | Google Gemini 2.5 Flash API (JSON mode)                |
+사용자 화면(Front-end)은 일관되게 \/api/kipris\ 라는 가상 주소로 호출하며, 위 프록시들이 이 요청을 가로채어 KIPRIS 본 서버로 안전하게 전달해 줍니다.

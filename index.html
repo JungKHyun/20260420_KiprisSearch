@@ -210,6 +210,7 @@
       <div class="form-group">
         <label>🔃 정렬 기준</label>
         <select id="sortSpec">
+          <option value="">기본정렬 (정확도순)</option>
           <option value="AD">출원일자</option>
           <option value="GD">등록일자</option>
           <option value="PD">공고일자</option>
@@ -300,10 +301,12 @@
       utility: utility ? 'true' : 'false',
       numOfRows,
       pageNo,
-      sortSpec,
-      descSort: 'true',
       ServiceKey: serviceKey
     };
+    if (sortSpec) {
+      paramsObj.sortSpec = sortSpec;
+      paramsObj.descSort = 'true';
+    }
     if (word) paramsObj.word = word;
     if (inventionTitle) paramsObj.inventionTitle = inventionTitle;
     if (applicant) paramsObj.applicant = applicant;
