@@ -1,0 +1,5 @@
+[[redirects]]
+  from = "/api/kipris"
+  to = "http://plus.kipris.or.kr/kipo-api/kipi/patUtiModInfoSearchSevice/getAdvancedSearch"
+  status = 200
+  force = true
