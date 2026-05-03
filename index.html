@@ -60,6 +60,27 @@
     .btn-outline { background: white; color: #1a237e; border: 1.5px solid #1a237e; }
     .btn-outline:hover:not(:disabled) { background: #e8eaf6; }
 
+    /* Delay info panel */
+    .delay-panel {
+      background: #f8f9ff;
+      border: 1.5px solid #c5cae9;
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+      font-size: 0.82rem;
+    }
+    .delay-panel-header { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .delay-panel-header label { font-weight: 600; color: #3949ab; white-space: nowrap; }
+    .delay-panel input[type=range] { flex: 1; min-width: 120px; max-width: 220px; accent-color: #3949ab; cursor: pointer; }
+    .delay-val { font-weight: 700; color: #1a237e; min-width: 52px; }
+    .model-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.79rem; }
+    .model-table th { background: #e8eaf6; color: #3949ab; padding: 5px 8px; text-align: left; font-weight: 600; }
+    .model-table td { padding: 4px 8px; border-bottom: 1px solid #e0e0e0; color: #444; }
+    .model-table tr:last-child td { border-bottom: none; }
+    .model-table .rec { color: #2e7d32; font-weight: 700; }
+    .model-table .warn { color: #e65100; font-weight: 700; }
+    .toggle-link { font-size: 0.78rem; color: #5c6bc0; cursor: pointer; text-decoration: underline; white-space: nowrap; margin-left: auto; }
+
     /* Error */
     .error-box {
       background: #ffebee;
@@ -162,9 +183,30 @@
       <input type="password" id="serviceKey" placeholder="KIPRIS Plus 발급 서비스 키 입력" autocomplete="off">
     </div>
     <!-- Gemini API 키 -->
-    <div class="form-group" style="margin-bottom:14px;">
-      <label>🤖 Gemini API 키 <span style="font-size:0.78rem;color:#999;font-weight:400;">(선택 · 입력 시 AI가 초록에서 키워드를 추출합니다)</span></label>
+    <div class="form-group" style="margin-bottom:10px;">
+      <label>🤖 Gemini API 키 <span style="font-size:0.78rem;color:#999;font-weight:400;">(선택 · 핵심요약·키워드 추출 버튼 클릭 시 사용됩니다)</span></label>
       <input type="password" id="geminiKey" placeholder="Gemini API Key (선택사항)" autocomplete="off">
+    </div>
+    <!-- AI 요청 지연 설정 -->
+    <div class="delay-panel" style="margin-bottom:14px;">
+      <div class="delay-panel-header">
+        <label>⏱ AI 요청 간격</label>
+        <input type="range" id="geminiDelay" min="500" max="10000" step="500" value="4000" oninput="updateDelayLabel()">
+        <span class="delay-val" id="delayLabel">4.0초</span>
+        <span class="toggle-link" onclick="toggleModelTable()">📋 모델별 권장값 보기</span>
+      </div>
+      <div id="modelTableWrap" style="display:none;">
+        <table class="model-table">
+          <thead><tr><th>모델</th><th>무료 RPM 한도</th><th>권장 간격</th><th>비고</th></tr></thead>
+          <tbody>
+            <tr><td>gemini-2.5-flash</td><td>10 RPM</td><td class="rec">6.0초 이상</td><td>최신 추론 모델 · 무료 한도 낮음</td></tr>
+            <tr><td>gemini-2.0-flash</td><td>15 RPM</td><td class="rec">4.0초 이상</td><td>기본값 추천</td></tr>
+            <tr><td>gemini-2.0-flash-lite</td><td>30 RPM</td><td class="rec">2.0초 이상</td><td>빠른 처리 · 경량 모델</td></tr>
+
+          </tbody>
+        </table>
+        <p style="margin-top:6px;font-size:0.76rem;color:#888;">※ 무료 한도는 구글 정책에 따라 변경될 수 있습니다. 429 오류 발생 시 간격을 늘리세요.</p>
+      </div>
     </div>
 
     <!-- 검색 조건 -->
@@ -254,6 +296,7 @@
   let currentRows = 30;
   let lastSearchWord = '';
   let stopGemini = false;
+  let geminiDelayMs = 4000;
 
   const API_BASE = '/api/kipris';
 
@@ -263,6 +306,12 @@
     if (saved) document.getElementById('serviceKey').value = saved;
     const savedGemini = localStorage.getItem('geminiKey');
     if (savedGemini) document.getElementById('geminiKey').value = savedGemini;
+    const savedDelay = localStorage.getItem('geminiDelay');
+    if (savedDelay) {
+      document.getElementById('geminiDelay').value = savedDelay;
+      geminiDelayMs = parseInt(savedDelay);
+    }
+    updateDelayLabel();
 
     ['word', 'inventionTitle', 'applicant'].forEach(id => {
       document.getElementById(id).addEventListener('keydown', e => {
@@ -357,7 +406,7 @@
 
     const results = [];
     items.forEach(item => {
-      results.push({
+      const newResult = {
         inventionTitle: getXmlText(item, 'inventionTitle'),
         applicationNumber: getXmlText(item, 'applicationNumber'),
         applicationDate: formatDate(getXmlText(item, 'applicationDate')),
@@ -367,8 +416,9 @@
         applicantName: getXmlText(item, 'applicantName'),
         ipcNumber: getXmlText(item, 'ipcNumber'),
         astrtCont: getXmlText(item, 'astrtCont'),
-      });
-      results[results.length - 1].keywords = extractKeywords(results[results.length - 1].astrtCont);
+      };
+      newResult.ipc2 = getIpc2(newResult.ipcNumber);
+      results.push(newResult);
     });
 
     currentResults = results;
@@ -376,9 +426,6 @@
 
     renderResults(results, totalCount, numOfRows, pageNo);
     document.getElementById('noticeArea').innerHTML = '';
-
-    const geminiKey2 = document.getElementById('geminiKey').value.trim();
-    if (geminiKey2) extractAllKeywordsWithGemini(results, geminiKey2);
   }
 
   // ─── 결과 테이블 렌더링 ──────────────────────────────────
@@ -391,10 +438,10 @@
       return;
     }
 
-    const useGemini = !!document.getElementById('geminiKey').value.trim();
     const rows = results.map((r, i) => {
       const statusBadge = makeStatusBadge(r.registerStatus);
-        const ipcChips = r.ipcNumber ? r.ipcNumber.split('|').map(c => `<span class="chip" style="cursor:pointer;" onclick="showIpcDesc('${c.trim()}')" title="클릭하여 IPC 코드 설명 보기">${c.trim()}</span>`).join('') : '-';
+      const ipcChips = r.ipcNumber ? r.ipcNumber.split('|').map(c => `<span class="chip" style="cursor:pointer;" onclick="showIpcDesc('${c.trim()}')" title="클릭하여 IPC 코드 설명 보기">${c.trim()}</span>`).join('') : '-';
+      const ipc2Chips = r.ipc2 ? r.ipc2.split(' | ').map(c => `<span class="chip" style="cursor:pointer;" onclick="showIpcDesc('${c.trim()}')" title="클릭하여 IPC 코드 설명 보기">${c.trim()}</span>`).join('') : '-';
       const titleText = escHtml(r.inventionTitle) || '-';
       const titleCell = r.applicationNumber
         ? `<a href="https://kipris.or.kr/khome/search/searchResult.do?searchLogicCode=OR&searchKeyword=${encodeURIComponent(r.applicationNumber)}&collection=KR_PATENT" target="_blank" title="${titleText}">${titleText}</a>`
@@ -410,11 +457,12 @@
           <td>${statusBadge}</td>
           <td>${escHtml(r.applicantName) || '-'}</td>
           <td>${ipcChips}</td>
+          <td>${ipc2Chips}</td>
           <td class="td-abstract">
             <span class="abstract-text" onclick="toggleAbstract(this)" title="클릭하여 펼치기">${escHtml(r.astrtCont) || '-'}</span>
           </td>
-          <td id="sum-${i}" style="min-width:160px;max-width:260px;font-size:0.8rem;color:#444;line-height:1.5;">${useGemini ? '<span style="color:#aaa;font-size:0.74rem;">🤖 요약 중...</span>' : '-'}</td>
-          <td id="kw-${i}" style="min-width:140px;max-width:200px;">${useGemini ? '<span style="color:#aaa;font-size:0.74rem;">🤖 추출 중...</span>' : (r.keywords && r.keywords.length ? r.keywords.map(k => `<span class="kw-tag">${escHtml(k)}</span>`).join('') : '-')}</td>
+          <td id="sum-${i}" style="min-width:160px;max-width:260px;font-size:0.8rem;color:#444;line-height:1.5;">-</td>
+          <td id="kw-${i}" style="min-width:140px;max-width:200px;">-</td>
         </tr>`;
     }).join('');
 
@@ -428,7 +476,8 @@
             &nbsp;(${pageNo} / ${totalPages} 페이지)
           </div>
           <div class="download-btns">
-            ${useGemini ? `<button id="stopGeminiBtn" class="btn btn-outline" style="border-color:#e53935;color:#e53935;" onclick="stopGemini=true;this.disabled=true;this.innerText='🛑 정지됨';">🛑 AI 요약 멈춤</button>` : ''}
+            <button id="aiExtractBtn" class="btn btn-outline" onclick="runAiExtraction()">🤖 핵심요약·키워드 추출</button>
+            <button id="stopGeminiBtn" class="btn btn-outline" style="border-color:#e53935;color:#e53935;display:none;" onclick="stopGemini=true;this.disabled=true;this.innerText='🛑 정지됨';">🛑 AI 요약 멈춤</button>
             <button class="btn btn-success" onclick="downloadExcel()">📥 Excel 다운로드</button>
             <button class="btn btn-outline" onclick="downloadCSV()">📄 CSV 다운로드</button>
           </div>
@@ -446,6 +495,7 @@
                 <th>등록상태</th>
                 <th>출원인</th>
                 <th>IPC코드</th>
+                <th>IPC코드2</th>
                 <th>초록</th>
                 <th>핵심 요약</th>
                 <th>주요 키워드</th>
@@ -481,17 +531,17 @@
   // ─── Excel 다운로드 ──────────────────────────────────────
   function downloadExcel() {
     if (!currentResults.length) { alert('다운로드할 데이터가 없습니다.'); return; }
-    const header = ['No.', '발명의명칭', '출원번호', '출원일자', '등록번호', '등록일자', '등록상태', '출원인', 'IPC코드', '초록', '핵심요약', '주요키워드'];
+    const header = ['No.', '발명의명칭', '출원번호', '출원일자', '등록번호', '등록일자', '등록상태', '출원인', 'IPC코드', 'IPC코드2', '초록', '핵심요약', '주요키워드'];
     const rows = currentResults.map((r, i) => [
       (currentPage - 1) * currentRows + i + 1,
       r.inventionTitle, r.applicationNumber, r.applicationDate,
       r.registerNumber, r.registerDate, r.registerStatus,
-      r.applicantName, r.ipcNumber, r.astrtCont,
-      r.summary || '',
+      r.applicantName, r.ipcNumber, r.ipc2 || '',
+      r.astrtCont, r.summary || '',
       (r.keywords || []).join(', ')
     ]);
     const ws = XLSX.utils.aoa_to_sheet([header, ...rows]);
-    ws['!cols'] = [5, 40, 16, 12, 16, 12, 10, 20, 15, 50, 35, 30].map(w => ({ wch: w }));
+    ws['!cols'] = [5, 40, 16, 12, 16, 12, 10, 20, 15, 12, 50, 35, 30].map(w => ({ wch: w }));
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, '특허검색결과');
     XLSX.writeFile(wb, `KIPRIS_${lastSearchWord}_p${currentPage}.xlsx`);
@@ -500,13 +550,13 @@
   // ─── CSV 다운로드 ─────────────────────────────────────────
   function downloadCSV() {
     if (!currentResults.length) { alert('다운로드할 데이터가 없습니다.'); return; }
-    const header = ['No.', '발명의명칭', '출원번호', '출원일자', '등록번호', '등록일자', '등록상태', '출원인', 'IPC코드', '초록', '핵심요약', '주요키워드'];
+    const header = ['No.', '발명의명칭', '출원번호', '출원일자', '등록번호', '등록일자', '등록상태', '출원인', 'IPC코드', 'IPC코드2', '초록', '핵심요약', '주요키워드'];
     const csvRows = [header, ...currentResults.map((r, i) => [
       (currentPage - 1) * currentRows + i + 1,
       r.inventionTitle, r.applicationNumber, r.applicationDate,
       r.registerNumber, r.registerDate, r.registerStatus,
-      r.applicantName, r.ipcNumber, r.astrtCont,
-      r.summary || '',
+      r.applicantName, r.ipcNumber, r.ipc2 || '',
+      r.astrtCont, r.summary || '',
       (r.keywords || []).join(', ')
     ])].map(row => row.map(v => `"${(v || '').toString().replace(/"/g, '""')}"`).join(','));
     const bom = '\uFEFF';
@@ -544,6 +594,46 @@
               : status.includes('소멸') || status.includes('거절') ? 'badge-dismiss'
               : 'badge-default';
     return `<span class="badge ${cls}">${escHtml(status)}</span>`;
+  }
+
+  function updateDelayLabel() {
+    const val = parseInt(document.getElementById('geminiDelay').value);
+    geminiDelayMs = val;
+    localStorage.setItem('geminiDelay', val);
+    document.getElementById('delayLabel').textContent = (val / 1000).toFixed(1) + '초';
+  }
+
+  function toggleModelTable() {
+    const wrap = document.getElementById('modelTableWrap');
+    wrap.style.display = wrap.style.display === 'none' ? '' : 'none';
+  }
+
+  function getIpc2(ipcNumber) {
+    if (!ipcNumber) return '';
+    const codes = ipcNumber.split('|').map(c => c.trim().substring(0, 4)).filter(c => c.length === 4);
+    return [...new Set(codes)].join(' | ');
+  }
+
+  // ─── AI 추출 버튼 핸들러 ─────────────────────────────────
+  function runAiExtraction() {
+    const geminiKey = document.getElementById('geminiKey').value.trim();
+    if (!geminiKey) { alert('Gemini API 키를 입력해주세요.'); document.getElementById('geminiKey').focus(); return; }
+    if (!currentResults.length) { alert('먼저 검색을 실행해주세요.'); return; }
+
+    const extractBtn = document.getElementById('aiExtractBtn');
+    const stopBtn = document.getElementById('stopGeminiBtn');
+    if (extractBtn) { extractBtn.disabled = true; extractBtn.innerText = '🤖 추출 중...'; }
+    if (stopBtn) { stopBtn.style.display = ''; stopBtn.disabled = false; stopBtn.innerText = '🛑 AI 요약 멈춤'; }
+
+    currentResults.forEach((r, i) => {
+      const sumCell = document.getElementById(`sum-${i}`);
+      const kwCell = document.getElementById(`kw-${i}`);
+      if (sumCell) sumCell.innerHTML = '<span style="color:#aaa;font-size:0.74rem;">🤖 요약 중...</span>';
+      if (kwCell) kwCell.innerHTML = '<span style="color:#aaa;font-size:0.74rem;">🤖 추출 중...</span>';
+    });
+
+    stopGemini = false;
+    extractAllKeywordsWithGemini(currentResults, geminiKey);
   }
 
   // ─── Gemini AI 요약+키워드 추출 ──────────────────────────────────────────────────────────
@@ -634,8 +724,10 @@
         if (sumCell) sumCell.innerHTML = errHtml;
         if (kwCell) kwCell.innerHTML = errHtml;
       }
-      if (i < results.length - 1) await new Promise(r => setTimeout(r, 1500));
+      if (i < results.length - 1) await new Promise(r => setTimeout(r, geminiDelayMs));
     }
+    const extractBtn = document.getElementById('aiExtractBtn');
+    if (extractBtn) { extractBtn.disabled = false; extractBtn.innerText = '🤖 핵심요약·키워드 추출'; }
     const stopBtn = document.getElementById('stopGeminiBtn');
     if (stopBtn) stopBtn.style.display = 'none';
   }

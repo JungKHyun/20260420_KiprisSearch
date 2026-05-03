@@ -32,8 +32,6 @@
 2. 대시보드에서 \[Add new site] -> [Deploy manually]\를 선택합니다.
 3. 내 PC의 \260420_KiprisSearch\ 폴더를 화면에 드래그 앤 드롭합니다.
 4. 즉시 고유 URL이 생성되며 배포가 완료됩니다.
-   >
-   >
 
 ### 방식 3: 로컬 PC에서 직접 실행 (보조/테스트 용도)
 
@@ -56,9 +54,11 @@ python server.py
 *(입력한 키 값은 서버로 전송되지 않고, 사용자 PC 브라우저의 LocalStorage에 안전하게 저장됩니다.)*
 
 1. **KIPRIS Plus API Key (특허 검색용)**
+
    - [KIPRIS Plus](https://plus.kipris.or.kr) 회원가입 및 로그인
    - 마이페이지 → \[특허·실용신안] 발명의명칭,출원인,초록,청구항 등 검색\ 서비스 키 발급
 2. **Google Gemini API Key (초록 요약 및 AI 키워드 추출용)**
+
    - [Google AI Studio](https://aistudio.google.com/app/apikey) 접속 (구글 계정 로그인)
    - \[Create API key]\ 버튼 클릭 후 키 복사
 
@@ -73,7 +73,7 @@ python server.py
 
 이를 해결하기 위해 본 프로젝트는 환경에 맞는 3가지 프록시 라우팅을 기본 내장하고 있습니다.
 
-* **Vercel 배포 시**: \ercel.json\ 내의 ewrites\ 규칙이 미들웨어 역할을 함.
+* **Vercel 배포 시**: \vercel.json\ 내의 ewrites\ 규칙이 미들웨어 역할을 함.
 * **Netlify 배포 시**: etlify.toml\ 내의 \[[redirects]]\ 규칙이 미들웨어 역할을 함.
 * **로컬 실행 시**: \server.py\의 \KiprisProxyHandler\가 미들웨어 역할을 함.
 
